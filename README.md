@@ -76,8 +76,9 @@ npm run build      # -> dist/
 ## Hosting on GitHub Pages
 
 1. In the repository, go to **Settings → Pages** and set **Source** to **GitHub Actions**.
-2. Push to `main`, or run **Actions → Deploy to GitHub Pages → Run workflow** against any
-   branch.
+2. Push to the repository's default branch. The workflow publishes from whichever branch is
+   the default, so renaming it to `main` later keeps working. You can also publish any other
+   branch by hand with **Actions → Deploy to GitHub Pages → Run workflow**.
 
 The workflow type-checks, runs the tests, builds with the repository name as the base path
 and publishes `dist/`. The site then lives at `https://<user>.github.io/<repo>/`.

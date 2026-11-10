@@ -2,7 +2,6 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main, master]
   # Lets you publish from any branch by hand: Actions -> Deploy to GitHub Pages -> Run workflow.
   workflow_dispatch:
 
@@ -17,6 +16,10 @@ concurrency:
 
 jobs:
   build:
+    # Publish only from the repository's default branch, whatever it is called,
+    # so renaming it or merging into main keeps working. Other branches are
+    # checked by ci.yml instead. A manual run publishes whichever ref you pick.
+    if: github.event_name == 'workflow_dispatch' || github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

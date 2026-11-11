@@ -21,3 +21,5 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      # Catches a story that no longer compiles or renders.
+      - run: npm run build-storybook

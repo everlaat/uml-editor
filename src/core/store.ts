@@ -1,5 +1,5 @@
 import { emptyDiagram, type Diagram } from './model';
-import { loadDoc, loadPrefs, saveDoc, savePrefs, type Prefs } from './storage';
+import { DEFAULT_PREFS, loadDoc, loadPrefs, saveDoc, savePrefs, type Prefs } from './storage';
 
 export interface Selection {
   nodes: Set<string>;
@@ -15,6 +15,18 @@ export interface PatchOptions {
 }
 
 type Listener = (doc: Diagram, reason: string) => void;
+
+export interface StoreOptions {
+  /** Start from this document instead of the last one in storage. */
+  doc?: Diagram;
+  /** Overrides on top of the stored preferences. */
+  prefs?: Partial<Prefs>;
+  /**
+   * Write through to localStorage. Off for stories and tests, which should
+   * neither read the person's diagrams nor leave any behind.
+   */
+  persist?: boolean;
+}
 
 const COALESCE_MS = 700;
 const MAX_HISTORY = 120;
@@ -41,11 +53,17 @@ export class Store {
   private saveTimer: number | undefined;
   private lastCoalesce: { key: string; at: number } | null = null;
   private saveFailed = false;
+  private readonly persist: boolean;
 
-  constructor() {
-    this.prefs = loadPrefs();
-    const last = this.prefs.lastDocId ? loadDoc(this.prefs.lastDocId) : null;
-    this.doc = last ?? emptyDiagram();
+  constructor(options: StoreOptions = {}) {
+    this.persist = options.persist ?? true;
+    this.prefs = { ...(this.persist ? loadPrefs() : DEFAULT_PREFS), ...options.prefs };
+    if (options.doc) {
+      this.doc = options.doc;
+    } else {
+      const last = this.persist && this.prefs.lastDocId ? loadDoc(this.prefs.lastDocId) : null;
+      this.doc = last ?? emptyDiagram();
+    }
   }
 
   subscribe(fn: Listener): () => void {
@@ -94,8 +112,7 @@ export class Store {
     this.lastCoalesce = null;
     this.doc = doc;
     this.selection = { nodes: new Set(), edges: new Set() };
-    this.prefs.lastDocId = doc.id;
-    savePrefs(this.prefs);
+    this.rememberDoc(doc);
     this.scheduleSave();
     this.emit(label);
   }
@@ -107,8 +124,7 @@ export class Store {
     this.redoStack = [];
     this.doc = doc;
     this.selection = { nodes: new Set(), edges: new Set() };
-    this.prefs.lastDocId = doc.id;
-    savePrefs(this.prefs);
+    this.rememberDoc(doc);
     this.scheduleSave();
     this.emit('open');
   }
@@ -144,8 +160,13 @@ export class Store {
 
   setPrefs(p: Partial<Prefs>): void {
     this.prefs = { ...this.prefs, ...p };
-    savePrefs(this.prefs);
+    if (this.persist) savePrefs(this.prefs);
     this.emit('prefs');
+  }
+
+  private rememberDoc(doc: Diagram): void {
+    this.prefs.lastDocId = doc.id;
+    if (this.persist) savePrefs(this.prefs);
   }
 
   select(nodes: string[] = [], edges: string[] = [], additive = false): void {
@@ -190,12 +211,14 @@ export class Store {
   }
 
   private scheduleSave(): void {
+    if (!this.persist) return;
     window.clearTimeout(this.saveTimer);
     this.saveTimer = window.setTimeout(() => this.flush(), 350);
   }
 
   /** Persist immediately; safe to call often. */
   flush(): void {
+    if (!this.persist) return;
     window.clearTimeout(this.saveTimer);
     const ok = saveDoc(this.doc);
     if (!ok && !this.saveFailed) {

@@ -1,0 +1,33 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+
+<Meta title="Introduction" />
+
+# UML Editor components
+
+A local-first flowchart and UML editor built without a UI framework: panels are
+functions that build DOM, and the canvas is a hand-rolled SVG renderer. These
+stories are the component library for that code.
+
+### How the stories are organised
+
+- **Foundations** — the primitives every panel is made of: buttons, inputs,
+  swatches, the segmented control, the dropzone, inline problems, and the icon set.
+- **Canvas** — the drawing surface, driven by a real editor: shapes, colours,
+  flow directions and the reserved lanes that keep long edges off other shapes.
+- **Panels** — the sidebars: shape palette, inspector, Mermaid and Generate.
+- **Chrome** — the toolbar.
+- **Overlays** — modals, the popover menu and toasts.
+
+### Conventions
+
+Every story builds a real component against a real `Editor`, so interactions
+work: select a shape and the inspector follows, type Mermaid and the canvas
+redraws. Story editors are created with `persist: false`, so browsing the
+library never reads or overwrites the diagrams in your browser.
+
+Use the theme switcher in the toolbar to check a component in light and dark.
+Colours are resolved from palette tokens at render time, so both should look
+deliberate rather than inverted.
+
+Fixtures live in `src/stories/harness.ts` as Mermaid source, which keeps them
+readable and exercises the parser on every story load.

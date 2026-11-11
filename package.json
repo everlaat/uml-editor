@@ -10,10 +10,16 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/*.test.mjs",
-    "pretest": "esbuild src/testables.ts --bundle --format=esm --platform=node --outfile=test/.build/testables.mjs --log-level=warning"
+    "pretest": "esbuild src/testables.ts --bundle --format=esm --platform=node --outfile=test/.build/testables.mjs --log-level=warning",
+    "storybook": "storybook dev -p 6006 --no-open",
+    "build-storybook": "storybook build"
   },
   "devDependencies": {
+    "@storybook/addon-docs": "^10.6.7",
+    "@storybook/addon-themes": "^10.6.7",
+    "@storybook/html-vite": "^10.6.7",
     "esbuild": "^0.21.5",
+    "storybook": "^10.6.7",
     "typescript": "^5.6.3",
     "vite": "^5.4.10"
   }

@@ -75,11 +75,32 @@ Nothing is uploaded in any mode.
 
 ```bash
 npm install
-npm run dev        # http://localhost:5173
-npm test           # parser, serializer, generator and layout tests
+npm run dev              # the editor, http://localhost:5173
+npm run storybook        # the component library, http://localhost:6006
+npm test                 # parser, serializer, generator, layout and routing tests
 npm run typecheck
-npm run build      # -> dist/
+npm run build            # the app       -> dist/
+npm run build-storybook  # the library   -> storybook-static/
 ```
+
+## Storybook
+
+Every panel, overlay and canvas state has a story, grouped as **Foundations**
+(buttons, inputs, swatches, icons), **Canvas**, **Panels**, **Chrome** and
+**Overlays**. Stories live beside the code they cover (`src/ui/*.stories.ts`,
+`src/render/scene.stories.ts`).
+
+Each story builds the real component against a real `Editor`, so the
+interactions work: select a shape and the inspector follows it, type Mermaid and
+the canvas redraws. Story editors are constructed with `persist: false`, so
+browsing the library never reads or overwrites the diagrams in your browser.
+Shared fixtures and frames live in `src/stories/harness.ts`; the fixtures are
+Mermaid source, so loading a story also exercises the parser.
+
+The theme switcher in the Storybook toolbar flips `data-theme` on the document,
+which is the same switch the app uses — components should look deliberate in
+both. CI builds Storybook on branches and pull requests, so a story that stops
+compiling or rendering fails the build.
 
 ## Hosting on GitHub Pages
 

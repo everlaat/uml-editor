@@ -55,6 +55,7 @@ export class Editor {
   private clipboard: { nodes: DiagramNode[]; edges: DiagramEdge[] } | null = null;
   private editing: { el: HTMLTextAreaElement; nodeId?: string; edgeId?: string } | null = null;
   private events: EditorEvents;
+  private teardown: (() => void)[] = [];
 
   constructor(host: HTMLElement, store: Store, events: EditorEvents = {}) {
     this.host = host;
@@ -72,7 +73,7 @@ export class Editor {
     this.bindPointer();
     this.bindKeys();
     this.bindWheel();
-    store.subscribe(() => this.scheduleRender());
+    this.teardown.push(store.subscribe(() => this.scheduleRender()));
     let lastSize = this.scene.size();
     const ro = new ResizeObserver(() => {
       // Hold the centre of the canvas steady as panels open or the window changes.
@@ -87,7 +88,18 @@ export class Editor {
       this.scheduleRender();
     });
     ro.observe(host);
+    this.teardown.push(() => ro.disconnect());
     this.render();
+  }
+
+  /**
+   * Detach from the window. The app never unmounts, but stories and tests
+   * create editors repeatedly and must not leave key handlers behind.
+   */
+  destroy(): void {
+    for (const off of this.teardown.splice(0)) off();
+    this.overlay.remove();
+    this.scene.svg.remove();
   }
 
   // ------------------------------------------------------------- rendering
@@ -379,7 +391,7 @@ export class Editor {
   }
 
   private bindKeys(): void {
-    window.addEventListener('keydown', (e) => {
+    const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space' && !isTypingTarget(e.target)) {
         this.spaceDown = true;
         this.host.classList.add('pan-ready');
@@ -505,12 +517,18 @@ export class Editor {
           this.scheduleRender();
           break;
       }
-    });
-    window.addEventListener('keyup', (e) => {
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
         this.spaceDown = false;
         this.host.classList.remove('pan-ready');
       }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    this.teardown.push(() => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
     });
   }
 

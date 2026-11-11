@@ -1,0 +1,101 @@
+/*
+ * The app owns the whole viewport; a story is a fragment on a page that
+ * scrolls. Undo just enough of that for the preview iframe.
+ */
+html,
+body {
+  height: auto;
+  overflow: auto;
+  background: var(--bg);
+}
+
+.sb-show-main.sb-main-centered {
+  padding: 20px;
+}
+
+/* Frame a panel the way the real sidebar does, so spacing reads true. */
+.sb-panel {
+  width: 312px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.sb-panel.wide {
+  width: 360px;
+}
+
+.sb-panel.narrow {
+  width: 188px;
+}
+
+.sb-canvas {
+  position: relative;
+  width: 760px;
+  max-width: 100%;
+  height: 460px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.sb-chrome {
+  width: min(1100px, 92vw);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.sb-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  width: min(900px, 92vw);
+}
+
+.sb-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.sb-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.sb-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font: 500 11px var(--font);
+  text-align: center;
+}
+
+.sb-note {
+  width: min(680px, 92vw);
+  margin: 0 0 4px;
+  color: var(--text-dim);
+  font: 400 12.5px/1.6 var(--font);
+}
+
+.sb-label {
+  color: var(--text-faint);
+  font: 600 10.5px var(--font);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}

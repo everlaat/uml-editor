@@ -162,3 +162,27 @@ test('layout ranks a cyclic graph without hanging', () => {
   layoutDiagram(doc, { direction: 'LR' });
   assert.equal(new Set(doc.nodes.map((n) => n.x)).size, 3);
 });
+
+test('image downscaling keeps the aspect ratio and never enlarges', async () => {
+  const { planResize, MAX_IMAGE_SIDE } = await import('./.build/testables.mjs');
+  assert.deepEqual(planResize(400, 300), { width: 400, height: 300 });
+  assert.deepEqual(planResize(1536, 768, 768), { width: 768, height: 384 });
+  assert.deepEqual(planResize(768, 1536, 768), { width: 384, height: 768 });
+  const wide = planResize(4000, 25, MAX_IMAGE_SIDE);
+  assert.equal(wide.width, MAX_IMAGE_SIDE);
+  assert.ok(wide.height >= 1, 'a very wide image must not collapse to zero height');
+  assert.deepEqual(planResize(0, 0), { width: 1, height: 1 });
+});
+
+test('the image instructions ask for parseable output and the retry says what broke', async () => {
+  const { IMAGE_INSTRUCTION, repairInstruction } = await import('./.build/testables.mjs');
+  assert.match(IMAGE_INSTRUCTION, /Mermaid code ONLY/);
+  assert.match(IMAGE_INSTRUCTION, /flowchart TD/);
+  assert.match(repairInstruction('no Mermaid code in the reply'), /could not be parsed: no Mermaid code/);
+});
+
+test('reads mermaid out of a vision reply that starts with chatter', async () => {
+  const { extractMermaid } = await import('./.build/testables.mjs');
+  const reply = 'The image shows a login flow.\n\nflowchart TD\n  a["Sign in"] --> b["Dashboard"]\n\nThis diagram shows the steps.';
+  assert.equal(extractMermaid(reply), 'flowchart TD\n  a["Sign in"] --> b["Dashboard"]');
+});

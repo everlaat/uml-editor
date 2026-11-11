@@ -45,9 +45,9 @@ stereotypes, cardinality and the full relation vocabulary (`<|--`, `*--`, `o--`,
 Not yet supported: sequence, state, ER, gantt and the other Mermaid diagram types — those
 are reported as unsupported rather than mangled.
 
-**Drafting from a description**
+**Drafting from a description, or from a picture**
 
-The *Generate* tab has two generators:
+The *Generate* tab has two generators plus an image reader:
 
 - **Instant** (the default) — a rule-based reader of your words. No download, works offline,
   returns in milliseconds. It understands sequences, `if … otherwise …` branches, loops and
@@ -61,7 +61,15 @@ The *Generate* tab has two generators:
   nothing. Needs Chrome/Edge 113+ or Safari 18+; the weights are cached by the browser, so
   after the first run it works offline too.
 
-Nothing is uploaded in either mode.
+- **From a picture** — drop a screenshot or a photo of a whiteboard onto the panel (or
+  onto the canvas, or paste it), and `Phi-3.5-vision` reads it on WebGPU and writes out the
+  Mermaid, which is parsed and laid out like any other diagram. The image is downscaled to
+  768px and stays in the tab. This model is a large first download (a few GB) and is only
+  offered when an image is actually attached; without WebGPU the panel says so instead of
+  failing obscurely. Expect a clean screenshot to come back close to exact and a hurried
+  whiteboard sketch to need tidying — it is a 4B-parameter model running in a browser tab.
+
+Nothing is uploaded in any mode.
 
 ## Running it
 
@@ -95,9 +103,9 @@ as about 37 KB gzipped, which is what keeps it feeling immediate.
 ```
 src/
   core/      model, store (snapshot undo + debounced persistence), geometry, layered layout
-  render/    keyed SVG scene, shape geometry, text measurement, theme tokens
+  render/    keyed SVG scene, edge routing, shape geometry, text measurement, theme
   mermaid/   parser (with line-accurate errors) and serializer
-  ai/        rule-based generator, WebLLM loader, generator orchestration
+  ai/        rule-based generator, WebLLM loader, image preparation, orchestration
   io/        SVG/PNG/JSON export, clipboard, file pickers
   ui/        toolbar, palette, inspector, Mermaid panel, generate panel, documents, modals
   editor.ts  canvas interaction and every document command
@@ -113,11 +121,19 @@ Design notes worth knowing if you extend it:
   thumbnails and the SVG export, so the three can never drift apart.
 - **The Mermaid parser is hand-written** and returns `{diagram, errors, warnings}` — it never
   throws and never half-applies.
+- **Auto-arrange is a real layered layout**: cycles broken, longest-path ranks, dummy nodes
+  for edges that skip a rank (these reserve the lane the edge is drawn in), barycentre
+  ordering and Sugiyama's priority method for coordinates. Lanes come back as `waypoints` on
+  the edge, stamped with the endpoint positions they assume, so a stale route is ignored
+  rather than drawn wrong.
 
 ## Known limits
 
 - Only flowchart and class diagrams; other Mermaid types are rejected with a clear message.
+- Reading a diagram out of an image needs WebGPU and a few GB of download, and the result is
+  a draft to check rather than a faithful transcription.
 - Subgraphs are imported, drawn and exported, but cannot yet be created from the canvas.
-- Edges route automatically — there are no manual waypoints yet.
+- Edges route automatically. Auto-arrange reserves a lane for every edge that skips a rank,
+  so edges do not run under shapes, but you cannot yet drag a bend point by hand.
 - `localStorage` is per-browser: diagrams do not follow you between devices. Export JSON to
   move them.

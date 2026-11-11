@@ -86,19 +86,30 @@ export function createPalette(editor: Editor): HTMLElement {
   return root;
 }
 
-/** Wires palette drag-and-drop onto the canvas host. */
-export function enableShapeDrop(editor: Editor, host: HTMLElement): void {
+/**
+ * Wires drops onto the canvas: a shape from the palette, or an image file to
+ * read a diagram out of.
+ */
+export function enableShapeDrop(editor: Editor, host: HTMLElement, onImage?: (file: File) => void): void {
   host.addEventListener('dragover', (e) => {
-    if (!e.dataTransfer?.types.includes(DRAG_MIME)) return;
+    const types = e.dataTransfer?.types ?? [];
+    if (!types.includes(DRAG_MIME) && !(onImage && types.includes('Files'))) return;
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
   });
   host.addEventListener('drop', (e) => {
     const shape = e.dataTransfer?.getData(DRAG_MIME) as NodeShape | undefined;
-    if (!shape) return;
-    e.preventDefault();
-    const p = editor.scene.screenToDiagram(e.clientX, e.clientY);
-    const node = editor.addNode(p, shape);
-    editor.editLabel(node.id);
+    if (shape) {
+      e.preventDefault();
+      const p = editor.scene.screenToDiagram(e.clientX, e.clientY);
+      const node = editor.addNode(p, shape);
+      editor.editLabel(node.id);
+      return;
+    }
+    const file = e.dataTransfer?.files?.[0];
+    if (onImage && file?.type.startsWith('image/')) {
+      e.preventDefault();
+      onImage(file);
+    }
   });
 }

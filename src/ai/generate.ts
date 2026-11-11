@@ -3,14 +3,15 @@ import { parseMermaid } from '../mermaid/parse';
 import { layoutDiagram, resolveOverlaps } from '../core/layout';
 import { fitNodeSize } from '../render/shapes';
 import { generateFromPrompt } from './heuristic';
-import { complete, ensureEngine, type ProgressInfo } from './webllm';
+import { complete, completeWithImage, ensureEngine, type ProgressInfo } from './webllm';
+import { IMAGE_INSTRUCTION, repairInstruction, type PreparedImage } from './vision';
 
 export type GeneratorMode = 'offline' | 'local-model';
 
 export interface GenerateResult {
   diagram: Diagram;
   mermaid: string;
-  source: 'offline' | 'local-model';
+  source: 'offline' | 'local-model' | 'image';
   note?: string;
 }
 
@@ -83,6 +84,59 @@ export async function generateWithLocalModel(prompt: string, opts: LocalModelOpt
     ...fallback,
     note: `The local model did not return usable Mermaid (${lastError}). Showing the offline draft instead.`,
   };
+}
+
+/**
+ * Read a diagram out of a picture with a local vision model. There is no
+ * offline fallback here — without a model there is nothing to read the image
+ * with — so a failure is reported plainly, including what the model did say.
+ */
+export async function generateFromImage(
+  image: PreparedImage,
+  opts: LocalModelOptions,
+): Promise<GenerateResult> {
+  await ensureEngine(opts.modelId, opts.onProgress);
+  opts.onStatus?.('Reading the image…');
+  let lastError = '';
+  let lastReply = '';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const instruction = attempt === 0 ? IMAGE_INSTRUCTION : repairInstruction(lastError);
+    const raw = await completeWithImage(instruction, image.dataUrl, {
+      maxTokens: 900,
+      temperature: attempt === 0 ? 0.1 : 0.3,
+    });
+    lastReply = raw.trim();
+    const code = extractMermaid(raw);
+    if (!code) {
+      lastError = 'no Mermaid code in the reply';
+      continue;
+    }
+    const parsed = parseMermaid(code, 'From image');
+    if (parsed.diagram && parsed.diagram.nodes.length) {
+      const diagram = parsed.diagram;
+      for (const n of diagram.nodes) {
+        const fit = fitNodeSize(n);
+        n.w = fit.w;
+        n.h = fit.h;
+      }
+      layoutDiagram(diagram);
+      resolveOverlaps(diagram);
+      return {
+        diagram,
+        mermaid: code,
+        source: 'image',
+        note:
+          diagram.nodes.length < 3
+            ? 'Only a couple of shapes came back — check it against the picture.'
+            : undefined,
+      };
+    }
+    lastError = parsed.errors[0]?.message ?? 'the reply was not a diagram';
+  }
+  throw new Error(
+    `The model could not turn that image into a diagram (${lastError}).` +
+      (lastReply ? ` It replied: “${lastReply.slice(0, 120)}${lastReply.length > 120 ? '…' : ''}”` : ''),
+  );
 }
 
 /** Pull mermaid out of a reply that may contain fences or chatter. */

@@ -50,7 +50,7 @@ function boot(): void {
   const tabs = [
     { id: 'inspect', label: 'Properties', el: inspector.el },
     { id: 'code', label: 'Mermaid', el: code.el },
-    { id: 'ai', label: 'Generate', el: ai },
+    { id: 'ai', label: 'Generate', el: ai.el },
   ];
   const tabBar = h('div', { class: 'tabbar' });
   const tabBody = h('div', { class: 'tab-body' });
@@ -81,7 +81,11 @@ function boot(): void {
     status,
   );
   setTab(active);
-  enableShapeDrop(editor, canvasHost);
+  enableShapeDrop(editor, canvasHost, (file) => {
+    // An image dropped on the canvas is a diagram to read, not a shape.
+    setTab('ai');
+    void ai.attachImage(file);
+  });
 
   // The canvas only has its real size once the panels are in the DOM.
   requestAnimationFrame(() => {

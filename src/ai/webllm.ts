@@ -14,6 +14,21 @@ export interface ModelChoice {
   sizeMB?: number;
 }
 
+/**
+ * The only vision-capable models WebLLM ships. They are large, so they are
+ * offered solely when there is actually an image to read.
+ */
+export const VISION_MODELS = [
+  'Phi-3.5-vision-instruct-q4f16_1-MLC',
+  'Phi-3.5-vision-instruct-q4f32_1-MLC',
+];
+
+export const DEFAULT_VISION_MODEL = VISION_MODELS[0];
+
+export function isVisionModel(modelId: string): boolean {
+  return /vision|vlm/i.test(modelId);
+}
+
 /** Shown first, if present in the runtime's prebuilt list. */
 const PREFERRED = [
   'Qwen2.5-1.5B-Instruct-q4f16_1-MLC',
@@ -84,14 +99,20 @@ async function loadModule(): Promise<WebLLMModule> {
   }
 }
 
-export async function listModels(): Promise<ModelChoice[]> {
+export async function listModels(kind: 'text' | 'vision' = 'text'): Promise<ModelChoice[]> {
   const mod = await loadModule();
   const all = mod.prebuiltAppConfig?.model_list ?? [];
   const byId = new Map(all.map((m) => [m.model_id, m]));
   const picked: ModelChoice[] = [];
-  for (const id of PREFERRED) {
+  for (const id of kind === 'vision' ? VISION_MODELS : PREFERRED) {
     const m = byId.get(id);
     if (m) picked.push({ id, label: prettyName(id), sizeMB: m.vram_required_MB });
+  }
+  if (kind === 'vision') {
+    if (picked.length) return picked;
+    return all
+      .filter((m) => isVisionModel(m.model_id))
+      .map((m) => ({ id: m.model_id, label: prettyName(m.model_id), sizeMB: m.vram_required_MB }));
   }
   if (picked.length) return picked;
   // Fallback: anything small enough to be plausible in a browser tab.
@@ -159,6 +180,42 @@ export async function complete(
     max_tokens: opts.maxTokens ?? 700,
   });
   return res.choices?.[0]?.message?.content ?? '';
+}
+
+/**
+ * Ask a vision model about an image. WebLLM wants the picture as a data URL in
+ * a content part; Phi-3.5-vision expects the image ahead of the question, and
+ * takes no system message, so the instructions ride along with it.
+ */
+export async function completeWithImage(
+  instruction: string,
+  imageDataUrl: string,
+  opts: { maxTokens?: number; temperature?: number } = {},
+): Promise<string> {
+  if (!engine) throw new Error('The local model is not loaded yet.');
+  if (!imageDataUrl.startsWith('data:image')) throw new Error('The image could not be read.');
+  try {
+    const res = await engine.chat.completions.create({
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'image_url', image_url: { url: imageDataUrl } },
+            { type: 'text', text: instruction },
+          ],
+        },
+      ],
+      temperature: opts.temperature ?? 0.2,
+      max_tokens: opts.maxTokens ?? 700,
+    });
+    return res.choices?.[0]?.message?.content ?? '';
+  } catch (err) {
+    const message = (err as Error).message ?? String(err);
+    if (/image adapter|image_url|not support/i.test(message)) {
+      throw new Error(`${engineModel ?? 'That model'} cannot read images. Pick a vision model and try again.`);
+    }
+    throw err;
+  }
 }
 
 export async function unload(): Promise<void> {

@@ -6,8 +6,10 @@ on:
 
 jobs:
   check:
-    # The default branch is already built and tested by the Pages deploy.
-    if: github.event_name == 'pull_request' || github.ref_name != github.event.repository.default_branch
+    # Branches that publish are already built and tested by the Pages deploy.
+    if: >-
+      github.event_name == 'pull_request'
+      || (github.ref_name != 'main' && github.ref_name != github.event.repository.default_branch)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

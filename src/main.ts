@@ -1,4 +1,5 @@
 import { Store } from './core/store';
+import { loadCustomShapes } from './shapes/custom';
 import { listDocs, loadDoc } from './core/storage';
 import { Editor } from './editor';
 import { parseMermaid } from './mermaid/parse';
@@ -20,6 +21,8 @@ const WELCOME = `flowchart TD
     save --> share[/"Export SVG, PNG or Mermaid"/]`;
 
 function boot(): void {
+  // Shapes first: a document may reference one of the user's own elements.
+  loadCustomShapes();
   const store = new Store();
 
   // First visit: start from a small example rather than a blank canvas.

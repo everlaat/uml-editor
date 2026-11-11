@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/html-vite';
-import { SHAPE_LABELS, type Direction, type NodeShape } from '../core/model';
+import type { Direction } from '../core/model';
+import { allShapes } from '../shapes/registry';
 import { layoutDiagram, resolveOverlaps } from '../core/layout';
 import { canvasFrame, diagramFrom, fixture, note, shapeShowcase, stack, storyEditor, FIXTURES } from '../stories/harness';
 
@@ -41,7 +42,7 @@ export const EdgeLanes: Story = {
 export const EveryShape: Story = {
   name: 'Every shape',
   render: () => {
-    const doc = shapeShowcase(Object.keys(SHAPE_LABELS) as NodeShape[]);
+    const doc = shapeShowcase(allShapes().map((s) => s.id));
     return canvasFrame(storyEditor({ doc }).host);
   },
 };

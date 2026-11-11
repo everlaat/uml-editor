@@ -59,6 +59,18 @@ export const Connection: Story = {
     }),
 };
 
+export const TextElement: Story = {
+  name: 'Free text — type settings',
+  render: () =>
+    stack(
+      note('Font, size, weight, slant, case, colour and both alignments apply to any label: a shape\u2019s text, an edge\u2019s text, or free text on the canvas.'),
+      inspectorWith((editor) => {
+        const node = editor.addNode({ x: 200, y: 120 }, 'text', 'Owned by the data team');
+        editor.store.select([node.id]);
+      }),
+    ),
+};
+
 export const UmlClass: Story = {
   name: 'UML class — compartments',
   render: () =>

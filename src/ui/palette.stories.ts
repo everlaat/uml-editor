@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/html-vite';
-import { SHAPE_LABELS, type NodeShape } from '../core/model';
+import { allShapes, shapeDef } from '../shapes/registry';
 import { createPalette, shapePreview } from './palette';
 import { note, panelFrame, stack, storyEditor } from '../stories/harness';
 
@@ -21,13 +21,13 @@ export const Thumbnails: Story = {
   render: () => {
     const grid = document.createElement('div');
     grid.className = 'sb-grid';
-    for (const shape of Object.keys(SHAPE_LABELS) as NodeShape[]) {
+    for (const shape of allShapes().map((s) => s.id)) {
       const tile = document.createElement('div');
       tile.className = 'sb-tile';
       const glyph = document.createElement('div');
       glyph.innerHTML = shapePreview(shape, 70, 46);
       const name = document.createElement('span');
-      name.textContent = SHAPE_LABELS[shape];
+      name.textContent = shapeDef(shape).name;
       const id = document.createElement('code');
       id.textContent = shape;
       id.style.color = 'var(--text-faint)';

@@ -1,21 +1,34 @@
 /** Core document model. Everything the editor can draw lives in a `Diagram`. */
 
-export type NodeShape =
-  | 'rect'
-  | 'round'
-  | 'stadium'
-  | 'subroutine'
-  | 'cylinder'
-  | 'circle'
-  | 'diamond'
-  | 'hexagon'
-  | 'parallelogram'
-  | 'parallelogram-alt'
-  | 'trapezoid'
-  | 'trapezoid-alt'
-  | 'class'
-  | 'actor'
-  | 'note';
+/**
+ * A shape id. Open rather than a union so user-defined shapes are ordinary
+ * citizens; `src/shapes/registry.ts` is the source of truth for what exists.
+ */
+export type NodeShape = string;
+
+export type TextFont = 'sans' | 'serif' | 'mono' | 'hand';
+export type TextAlign = 'left' | 'center' | 'right';
+export type TextVAlign = 'top' | 'middle' | 'bottom';
+
+/**
+ * Type settings for any label: a node's text, an edge's text, or a standalone
+ * piece of text on the canvas. Everything is optional — an unset field falls
+ * back to the shape's default, then to the theme.
+ */
+export interface TextStyle {
+  font?: TextFont;
+  size?: number;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  /** Palette token or CSS colour; unset means "read from the shape". */
+  color?: string;
+  align?: TextAlign;
+  valign?: TextVAlign;
+  lineHeight?: number;
+  letterSpacing?: number;
+  uppercase?: boolean;
+}
 
 export type EdgeLine = 'solid' | 'dashed' | 'thick';
 
@@ -50,6 +63,13 @@ export interface DiagramNode {
   stereotype?: string;
   /** Optional parent group id (subgraph / package). */
   parent?: string;
+  /** Type settings for this node's label. */
+  text?: TextStyle;
+  /**
+   * For user-defined shapes: the outline in a unit box, carried on the node so
+   * a shared document still draws correctly without the author's shape library.
+   */
+  customPath?: string;
 }
 
 export interface DiagramEdge {
@@ -62,6 +82,8 @@ export interface DiagramEdge {
   endArrow: ArrowHead;
   route?: RouteStyle;
   color?: string;
+  /** Type settings for this edge's label. */
+  text?: TextStyle;
   /**
    * Interior points the edge must pass through, produced by auto-layout for
    * edges that span more than one rank so they travel down their own lane
@@ -105,42 +127,6 @@ export interface Diagram {
 
 export const SCHEMA_VERSION = 1;
 
-export const DEFAULT_NODE_SIZE: Record<NodeShape, { w: number; h: number }> = {
-  rect: { w: 150, h: 60 },
-  round: { w: 150, h: 60 },
-  stadium: { w: 150, h: 56 },
-  subroutine: { w: 160, h: 60 },
-  cylinder: { w: 140, h: 70 },
-  circle: { w: 80, h: 80 },
-  diamond: { w: 150, h: 90 },
-  hexagon: { w: 160, h: 70 },
-  parallelogram: { w: 170, h: 60 },
-  'parallelogram-alt': { w: 170, h: 60 },
-  trapezoid: { w: 170, h: 60 },
-  'trapezoid-alt': { w: 170, h: 60 },
-  class: { w: 190, h: 110 },
-  actor: { w: 70, h: 100 },
-  note: { w: 160, h: 70 },
-};
-
-export const SHAPE_LABELS: Record<NodeShape, string> = {
-  rect: 'Process',
-  round: 'Rounded',
-  stadium: 'Terminal',
-  subroutine: 'Subroutine',
-  cylinder: 'Database',
-  circle: 'Connector',
-  diamond: 'Decision',
-  hexagon: 'Preparation',
-  parallelogram: 'Input',
-  'parallelogram-alt': 'Output',
-  trapezoid: 'Manual op',
-  'trapezoid-alt': 'Manual input',
-  class: 'UML class',
-  actor: 'Actor',
-  note: 'Note',
-};
-
 let counter = 0;
 /** Short, stable, URL-safe id. Monotonic suffix keeps ids unique within a tick. */
 export function uid(prefix = 'n'): string {
@@ -168,9 +154,12 @@ export function nodeById(d: Diagram, id: string): DiagramNode | undefined {
   return d.nodes.find((n) => n.id === id);
 }
 
-export function makeNode(partial: Partial<DiagramNode> & { x: number; y: number }): DiagramNode {
+export function makeNode(
+  partial: Partial<DiagramNode> & { x: number; y: number },
+  defaultSize: { w: number; h: number } = { w: 150, h: 60 },
+): DiagramNode {
   const shape = partial.shape ?? 'rect';
-  const size = DEFAULT_NODE_SIZE[shape];
+  const size = defaultSize;
   return {
     id: partial.id ?? uid(),
     label: partial.label ?? '',
@@ -184,6 +173,8 @@ export function makeNode(partial: Partial<DiagramNode> & { x: number; y: number 
     methods: partial.methods,
     stereotype: partial.stereotype,
     parent: partial.parent,
+    text: partial.text ? { ...partial.text } : undefined,
+    customPath: partial.customPath,
   };
 }
 
@@ -193,6 +184,7 @@ export function makeEdge(from: string, to: string, partial: Partial<DiagramEdge>
     from,
     to,
     label: partial.label,
+    text: partial.text ? { ...partial.text } : undefined,
     line: partial.line ?? 'solid',
     startArrow: partial.startArrow ?? 'none',
     endArrow: partial.endArrow ?? 'arrow',
@@ -215,7 +207,9 @@ export function normalizeDiagram(input: unknown, fallbackName = 'Imported diagra
             ...n,
             x: Number.isFinite(n.x) ? n.x : 0,
             y: Number.isFinite(n.y) ? n.y : 0,
-            shape: DEFAULT_NODE_SIZE[n.shape as NodeShape] ? n.shape : 'rect',
+            // An unknown shape id is kept, not rewritten: the shape may come
+            // from a library this browser has not loaded yet.
+            shape: typeof n.shape === 'string' && n.shape ? n.shape : 'rect',
           }),
         )
     : [];

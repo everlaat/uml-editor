@@ -2,10 +2,12 @@ import { boundsOf, f, pointAlong, type Pt, type Rect, type Side } from '../core/
 import type { ArrowHead, Diagram, DiagramNode } from '../core/model';
 import { parallelOffsets, routeEdge } from './route';
 import type { Selection } from '../core/store';
-import { classHeaderHeight, compartmentHeight, labelFontSize, shapeGeometry } from './shapes';
+import { shapeDef } from '../shapes/registry';
+import { classHeaderHeight, compartmentHeight, shapeGeometry } from './shapes';
 import { clear, setAttrs, svgEl } from './svg';
-import { FONT_STACK, MONO_STACK, measureLabel } from './text';
+import { FONT_STACK, MONO_STACK, measureStyled } from './text';
 import { resolveColor, type ThemeTokens } from './theme';
+import { resolveText, type ResolvedText } from './typography';
 
 export interface ViewState {
   x: number;
@@ -249,12 +251,14 @@ export class Scene {
     const color = resolveColor(this.theme, node.color);
     const local: DiagramNode = { ...node, x: 0, y: 0 };
     const geo = shapeGeometry(local);
-    const filled = node.shape !== 'actor';
+    const def = shapeDef(node.shape);
     g.append(
       svgEl('path', {
         d: geo.path,
-        fill: filled ? color.fill : 'none',
-        stroke: color.stroke,
+        // A bare text element still needs a hit area, so it keeps a
+        // transparent fill rather than disappearing from the pointer's view.
+        fill: geo.noStroke ? 'transparent' : geo.noFill ? 'none' : color.fill,
+        stroke: geo.noStroke ? 'none' : color.stroke,
         'stroke-width': 1.75,
         'stroke-linejoin': 'round',
         class: 'node-shape',
@@ -272,7 +276,7 @@ export class Scene {
         }),
       );
     }
-    if (node.shape === 'class') this.paintClassBody(g, local, color.text, color.stroke);
+    if (def.paintsOwnLabel) this.paintClassBody(g, local, color.text, color.stroke);
     else this.paintLabel(g, node, geo.textBox, color.text);
   }
 
@@ -280,26 +284,21 @@ export class Scene {
     g: SVGGElement,
     node: DiagramNode,
     box: { x: number; y: number; w: number; h: number },
-    fill: string,
+    fallbackColor: string,
   ): void {
     if (!node.label) return;
-    const size = labelFontSize(node.shape);
-    const weight = node.shape === 'note' ? 400 : 500;
-    const m = measureLabel(node.label, Math.max(30, box.w), size, weight);
-    const lineHeight = size * 1.35;
-    const startY = box.y + box.h / 2 - m.height / 2 + lineHeight * 0.72;
+    const style = resolveText(node.text, shapeDef(node.shape));
+    const measured = measureStyled(node.label, Math.max(30, box.w), style);
+    const lineHeight = style.size * style.lineHeight;
     const text = svgEl('text', {
-      x: f(box.x + box.w / 2),
-      y: f(startY),
-      fill,
-      'font-family': FONT_STACK,
-      'font-size': size,
-      'font-weight': weight,
-      'text-anchor': 'middle',
+      ...textAttrs(style, resolveColor(this.theme, style.color ?? undefined).stroke, fallbackColor),
       class: 'node-label',
     });
-    m.lines.forEach((line, i) => {
-      const tspan = svgEl('tspan', { x: f(box.x + box.w / 2), dy: i === 0 ? 0 : f(lineHeight) });
+    const x = anchorX(box, style.align);
+    const top = anchorTop(box, measured.height, style.valign);
+    setAttrs(text, { x: f(x), y: f(top + lineHeight * 0.76) });
+    measured.lines.forEach((line, i) => {
+      const tspan = svgEl('tspan', { x: f(x), dy: i === 0 ? 0 : f(lineHeight) });
       tspan.textContent = line;
       text.append(tspan);
     });
@@ -402,7 +401,9 @@ export class Scene {
       }
       if (edge.label) {
         const mid = pointAlong(pts, 0.5);
-        const m = measureLabel(edge.label, 180, 12, 500);
+        const style = resolveText(edge.text, undefined);
+        const labelSize = edge.text?.size ?? 12;
+        const m = measureStyled(edge.label, 180, { ...style, size: labelSize });
         const padX = 6;
         g.append(
           svgEl('rect', {
@@ -416,17 +417,15 @@ export class Scene {
           }),
         );
         const text = svgEl('text', {
+          ...textAttrs({ ...style, size: labelSize, align: 'center' },
+            edge.text?.color ? resolveColor(this.theme, edge.text.color).stroke : undefined,
+            selected ? this.theme.accent : this.theme.textMuted),
           x: f(mid.x),
-          y: f(mid.y - m.height / 2 + 12),
-          fill: selected ? this.theme.accent : this.theme.textMuted,
-          'font-family': FONT_STACK,
-          'font-size': 12,
-          'font-weight': 500,
-          'text-anchor': 'middle',
+          y: f(mid.y - m.height / 2 + labelSize),
           class: 'edge-label',
         });
         m.lines.forEach((line, i) => {
-          const tspan = svgEl('tspan', { x: f(mid.x), dy: i === 0 ? 0 : f(16) });
+          const tspan = svgEl('tspan', { x: f(mid.x), dy: i === 0 ? 0 : f(labelSize * style.lineHeight) });
           tspan.textContent = line;
           text.append(tspan);
         });
@@ -675,6 +674,32 @@ function arrowHead(tip: Pt, tail: Pt, kind: ArrowHead, color: string, theme: The
   }
 }
 
+/** Shared SVG attributes for a resolved text style. */
+function textAttrs(style: ResolvedText, color: string | undefined, fallback: string) {
+  return {
+    fill: color ?? fallback,
+    'font-family': style.family,
+    'font-size': style.size,
+    'font-weight': style.weight,
+    'font-style': style.italic ? 'italic' : undefined,
+    'text-decoration': style.underline ? 'underline' : undefined,
+    'letter-spacing': style.letterSpacing || undefined,
+    'text-anchor': style.align === 'left' ? 'start' : style.align === 'right' ? 'end' : 'middle',
+  };
+}
+
+function anchorX(box: { x: number; w: number }, align: ResolvedText['align']): number {
+  if (align === 'left') return box.x;
+  if (align === 'right') return box.x + box.w;
+  return box.x + box.w / 2;
+}
+
+function anchorTop(box: { y: number; h: number }, textHeight: number, valign: ResolvedText['valign']): number {
+  if (valign === 'top') return box.y;
+  if (valign === 'bottom') return box.y + box.h - textHeight;
+  return box.y + box.h / 2 - textHeight / 2;
+}
+
 function nodeSignature(n: DiagramNode): string {
   return [
     n.shape,
@@ -685,5 +710,7 @@ function nodeSignature(n: DiagramNode): string {
     n.stereotype ?? '',
     (n.attributes ?? []).join('\u0001'),
     (n.methods ?? []).join('\u0001'),
+    JSON.stringify(n.text ?? null),
+    n.customPath ?? '',
   ].join('\u0000');
 }

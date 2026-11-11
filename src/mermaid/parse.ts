@@ -31,7 +31,11 @@ const DIRECTIONS: Record<string, Direction> = {
   DT: 'BT',
 };
 
-/** Bracket pairs, longest prefix first so `[[` wins over `[`. */
+/**
+ * Bracket pairs, longest prefix first so `[[` wins over `[`. The canonical
+ * shape for each pair is whichever built-in declares it, which keeps the
+ * parser and the serializer in step automatically.
+ */
 const SHAPE_PAIRS: { open: string; close: string; shape: NodeShape }[] = [
   { open: '([', close: '])', shape: 'stadium' },
   { open: '[[', close: ']]', shape: 'subroutine' },
@@ -49,6 +53,15 @@ const SHAPE_PAIRS: { open: string; close: string; shape: NodeShape }[] = [
 ];
 
 const LINK_RE = /(<?)(-\.-+|-{2,}|={2,})(>|x|o|)(?:\|([^|]*)\|)?/;
+
+/**
+ * Which shape a bracket pair reads back as. A shape whose own pair maps to a
+ * different shape survives export but not re-import, which the fidelity
+ * report calls an approximation.
+ */
+export function canonicalShapeFor(open: string, close: string): NodeShape | undefined {
+  return SHAPE_PAIRS.find((p) => p.open === open && p.close === close)?.shape;
+}
 
 export function parseMermaid(text: string, name?: string): ParseResult {
   const errors: ParseIssue[] = [];

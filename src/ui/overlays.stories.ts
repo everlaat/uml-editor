@@ -3,6 +3,7 @@ import { button, h } from './dom';
 import { openDocsModal } from './docspanel';
 import { openHelp } from './help';
 import { attachMenu } from './menu';
+import { openCustomShapeDialog } from './customshape';
 import { openModal } from './modal';
 import { toast } from './toast';
 import { note, stack, storyEditor } from '../stories/harness';
@@ -67,6 +68,17 @@ export const Menu: Story = {
       { label: 'Diagram JSON', hint: 'full fidelity', onSelect: () => undefined },
     ]);
     return stack(note('Anchored under its trigger, closes on outside click, scroll or resize.'), trigger);
+  },
+};
+
+export const CustomShape: Story = {
+  name: 'Add your own shape',
+  render: () => {
+    const { editor } = storyEditor();
+    return stack(
+      note('Only SVG path data is accepted, and it is parsed before being stored, so nothing executable can enter a shape library that other documents reach.'),
+      button('Add a shape', () => openCustomShapeDialog(editor), { class: 'primary' }),
+    );
   },
 };
 

@@ -1,22 +1,22 @@
-import type { ArrowHead, Diagram, DiagramEdge, DiagramNode, EdgeLine, NodeShape } from '../core/model';
+import type { ArrowHead, Diagram, DiagramEdge, DiagramNode, EdgeLine } from '../core/model';
+import { hasShape, shapeDef } from '../shapes/registry';
 
-const WRAPPERS: Record<NodeShape, [string, string]> = {
-  rect: ['[', ']'],
-  round: ['(', ')'],
-  stadium: ['([', '])'],
-  subroutine: ['[[', ']]'],
-  cylinder: ['[(', ')]'],
-  circle: ['((', '))'],
-  diamond: ['{', '}'],
-  hexagon: ['{{', '}}'],
-  parallelogram: ['[/', '/]'],
-  'parallelogram-alt': ['[\\', '\\]'],
-  trapezoid: ['[/', '\\]'],
-  'trapezoid-alt': ['[\\', '/]'],
-  class: ['[', ']'],
-  actor: ['([', '])'],
-  note: ['[', ']'],
-};
+/**
+ * Elements Mermaid has no way to describe are left out of its output — and
+ * kept on the canvas when code is applied. A drawing has no Mermaid form, and
+ * neither does a shape this build has never heard of: guessing would turn
+ * someone else's element into a rectangle behind their back.
+ */
+export function isExpressibleInMermaid(node: DiagramNode): boolean {
+  if (node.customPath) return false;
+  if (!hasShape(node.shape)) return false;
+  return shapeDef(node.shape).mermaid !== null;
+}
+
+export function mermaidWrapper(node: DiagramNode): [string, string] {
+  const mapping = shapeDef(node.shape).mermaid;
+  return mapping ? [mapping.open, mapping.close] : ['[', ']'];
+}
 
 /** Diagram -> Mermaid source. Round-trips through `parseMermaid`. */
 export function toMermaid(doc: Diagram): string {
@@ -24,11 +24,14 @@ export function toMermaid(doc: Diagram): string {
 }
 
 function toFlowchart(doc: Diagram): string {
-  const ids = mermaidIds(doc.nodes);
+  // Free text, custom drawings and the like simply have no Mermaid form.
+  const nodes = doc.nodes.filter(isExpressibleInMermaid);
+  const keep = new Set(nodes.map((n) => n.id));
+  const ids = mermaidIds(nodes);
   const lines: string[] = [`flowchart ${doc.direction}`];
   const grouped = new Map<string, DiagramNode[]>();
   const loose: DiagramNode[] = [];
-  for (const n of doc.nodes) {
+  for (const n of nodes) {
     if (n.parent && doc.groups.some((g) => g.id === n.parent)) {
       const list = grouped.get(n.parent) ?? [];
       list.push(n);
@@ -45,19 +48,20 @@ function toFlowchart(doc: Diagram): string {
     lines.push('    end');
   }
   for (const e of doc.edges) {
+    if (!keep.has(e.from) || !keep.has(e.to)) continue;
     const from = ids.get(e.from);
     const to = ids.get(e.to);
     if (!from || !to) continue;
     lines.push(`    ${from} ${linkToken(e)} ${to}`);
   }
-  const styled = doc.nodes.filter((n) => n.color);
+  const styled = nodes.filter((n) => n.color);
   for (const n of styled) lines.push(`    style ${ids.get(n.id)} fill:${n.color}`);
   return lines.join('\n');
 }
 
 function declare(n: DiagramNode, ids: Map<string, string>): string {
   const id = ids.get(n.id)!;
-  const [open, close] = WRAPPERS[n.shape] ?? WRAPPERS.rect;
+  const [open, close] = mermaidWrapper(n);
   const label = escapeLabel(n.label || id);
   return `${id}${open}"${label}"${close}`;
 }
@@ -76,10 +80,12 @@ function baseToken(line: EdgeLine, start: ArrowHead, end: ArrowHead): string {
 }
 
 function toClassDiagram(doc: Diagram): string {
-  const ids = mermaidIds(doc.nodes, true);
+  const nodes = doc.nodes.filter(isExpressibleInMermaid);
+  const keep = new Set(nodes.map((n) => n.id));
+  const ids = mermaidIds(nodes, true);
   const lines: string[] = ['classDiagram'];
   if (doc.direction !== 'TB') lines.push(`    direction ${doc.direction}`);
-  for (const n of doc.nodes) {
+  for (const n of nodes) {
     const id = ids.get(n.id)!;
     const members = [
       ...(n.stereotype ? [`<<${n.stereotype}>>`] : []),
@@ -95,6 +101,7 @@ function toClassDiagram(doc: Diagram): string {
     lines.push('    }');
   }
   for (const e of doc.edges) {
+    if (!keep.has(e.from) || !keep.has(e.to)) continue;
     const from = ids.get(e.from);
     const to = ids.get(e.to);
     if (!from || !to) continue;

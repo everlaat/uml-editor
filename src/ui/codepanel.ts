@@ -1,4 +1,5 @@
 import type { Editor } from '../editor';
+import { mermaidFidelity } from '../mermaid/fidelity';
 import { parseMermaid } from '../mermaid/parse';
 import { toMermaid } from '../mermaid/serialize';
 import { copyText, pickFile } from '../io/export';
@@ -24,6 +25,7 @@ export function createCodePanel(editor: Editor): { el: HTMLElement; sync: () => 
   const area = h('textarea', { class: 'code-area mono', placeholder: 'flowchart TD\n  a["Step"] --> b["Next"]' });
   area.spellcheck = false;
   const problems = h('div', { class: 'problems' });
+  const fidelity = h('details', { class: 'fidelity' });
   let applying = false;
   let timer: number | undefined;
   let dirty = false;
@@ -34,6 +36,33 @@ export function createCodePanel(editor: Editor): { el: HTMLElement; sync: () => 
     if (next !== area.value) area.value = next;
     dirty = false;
     clearChildren(problems);
+    renderFidelity();
+  };
+
+  /**
+   * Mermaid describes structure, not appearance. Rather than silently dropping
+   * what it cannot say, the panel lists it — and the editor keeps those
+   * elements when the code is applied.
+   */
+  const renderFidelity = () => {
+    const issues = mermaidFidelity(editor.store.doc);
+    clearChildren(fidelity);
+    if (!issues.length) {
+      fidelity.open = false;
+      fidelity.append(
+        h('summary', { class: 'fidelity-ok', text: 'This diagram survives a round trip through Mermaid.' }),
+      );
+      return;
+    }
+    fidelity.append(
+      h('summary', {
+        text: `${issues.length} thing${issues.length === 1 ? '' : 's'} Mermaid cannot carry — click for detail`,
+      }),
+    );
+    const list = h('ul');
+    for (const issue of issues) list.append(h('li', { text: issue.message }));
+    list.append(h('li', { text: 'Export as JSON to keep everything exactly as it is.' }));
+    fidelity.append(list);
   };
 
   const apply = (announce = false) => {
@@ -52,7 +81,7 @@ export function createCodePanel(editor: Editor): { el: HTMLElement; sync: () => 
     }
     applying = true;
     try {
-      editor.applyDiagram(result.diagram, { preservePositions: true, label: 'mermaid' });
+      editor.applyDiagram(result.diagram, { preservePositions: true, preserveCanvasOnly: true, label: 'mermaid' });
     } finally {
       applying = false;
     }
@@ -116,6 +145,7 @@ export function createCodePanel(editor: Editor): { el: HTMLElement; sync: () => 
     h('div', { class: 'panel-label', text: 'Mermaid' }),
     area,
     problems,
+    fidelity,
     actions,
     h('p', {
       class: 'palette-hint',

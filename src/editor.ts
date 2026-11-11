@@ -1,7 +1,7 @@
 import { distToSegment, pointInRect, snap, type Pt, type Rect } from './core/geometry';
 import { adjustRoutes, anchorFor, layoutDiagram, resolveOverlaps } from './core/layout';
+import { mergeIncoming } from './core/merge';
 import {
-  DEFAULT_NODE_SIZE,
   makeEdge,
   makeNode,
   uid,
@@ -10,7 +10,10 @@ import {
   type DiagramNode,
   type Direction,
   type NodeShape,
+  type TextStyle,
 } from './core/model';
+import { pathForShapeId } from './shapes/custom';
+import { defaultSizeOf, shapeDef } from './shapes/registry';
 import { Store } from './core/store';
 import { Scene, portPoints, resizeHandles } from './render/scene';
 import { fitNodeSize } from './render/shapes';
@@ -535,21 +538,53 @@ export class Editor {
   // --------------------------------------------------------------- commands
 
   addNode(at: Pt, shape: NodeShape = 'rect', label = ''): DiagramNode {
-    const size = DEFAULT_NODE_SIZE[shape];
-    const node = makeNode({
-      x: snap(at.x - size.w / 2, this.store.prefs.snap ? GRID : 1),
-      y: snap(at.y - size.h / 2, this.store.prefs.snap ? GRID : 1),
-      shape,
-      label,
-      attributes: shape === 'class' ? [] : undefined,
-      methods: shape === 'class' ? [] : undefined,
-    });
-    this.store.patch((doc) => {
-      doc.nodes.push(node);
-      if (shape === 'class') doc.kind = 'class';
-    }, { label: 'add node' });
+    const def = shapeDef(shape);
+    const size = defaultSizeOf(shape);
+    const node = makeNode(
+      {
+        x: snap(at.x - size.w / 2, this.store.prefs.snap ? GRID : 1),
+        y: snap(at.y - size.h / 2, this.store.prefs.snap ? GRID : 1),
+        shape,
+        label,
+        attributes: def.paintsOwnLabel ? [] : undefined,
+        methods: def.paintsOwnLabel ? [] : undefined,
+        // Carried on the node so the document draws elsewhere too.
+        customPath: pathForShapeId(shape),
+      },
+      size,
+    );
+    this.store.patch(
+      (doc) => {
+        doc.nodes.push(node);
+        if (def.paintsOwnLabel) doc.kind = 'class';
+      },
+      { label: 'add node' },
+    );
     this.store.select([node.id]);
     return node;
+  }
+
+  /** Apply type settings to the current selection (nodes and edges alike). */
+  updateTextStyle(patch: Partial<TextStyle>, label = 'text style'): void {
+    const nodeIds = new Set(this.store.selection.nodes);
+    const edgeIds = new Set(this.store.selection.edges);
+    if (!nodeIds.size && !edgeIds.size) return;
+    this.store.patch(
+      (doc) => {
+        for (const n of doc.nodes) {
+          if (!nodeIds.has(n.id)) continue;
+          n.text = pruneStyle({ ...n.text, ...patch });
+          const fit = fitNodeSize(n);
+          n.w = Math.max(n.w, fit.w);
+          n.h = Math.max(n.h, fit.h);
+        }
+        for (const e of doc.edges) {
+          if (!edgeIds.has(e.id)) continue;
+          e.text = pruneStyle({ ...e.text, ...patch });
+        }
+      },
+      { label },
+    );
   }
 
   connect(from: string, to: string, partial: Partial<DiagramEdge> = {}): DiagramEdge | null {
@@ -571,14 +606,17 @@ export class Editor {
     const from = this.store.doc.nodes.find((n) => n.id === fromId);
     if (!from) return null;
     const shape: NodeShape = from.shape === 'class' ? 'class' : 'rect';
-    const size = DEFAULT_NODE_SIZE[shape];
-    const node = makeNode({
-      x: snap(at.x - size.w / 2, GRID),
-      y: snap(at.y - size.h / 2, GRID),
-      shape,
-      attributes: shape === 'class' ? [] : undefined,
-      methods: shape === 'class' ? [] : undefined,
-    });
+    const size = defaultSizeOf(shape);
+    const node = makeNode(
+      {
+        x: snap(at.x - size.w / 2, GRID),
+        y: snap(at.y - size.h / 2, GRID),
+        shape,
+        attributes: shape === 'class' ? [] : undefined,
+        methods: shape === 'class' ? [] : undefined,
+      },
+      size,
+    );
     const edge = makeEdge(from.id, node.id, {
       endArrow: this.store.doc.kind === 'class' ? 'open' : 'arrow',
     });
@@ -693,9 +731,11 @@ export class Editor {
   }
 
   setShape(shape: NodeShape): void {
+    const def = shapeDef(shape);
     this.updateSelectedNodes((n) => {
       n.shape = shape;
-      if (shape === 'class') {
+      n.customPath = pathForShapeId(shape);
+      if (def.paintsOwnLabel) {
         n.attributes ??= [];
         n.methods ??= [];
       }
@@ -703,7 +743,7 @@ export class Editor {
       n.w = Math.max(n.w, fit.w);
       n.h = Math.max(n.h, fit.h);
     }, 'shape');
-    if (shape === 'class') this.store.patch((doc) => void (doc.kind = 'class'), { label: 'kind' });
+    if (def.paintsOwnLabel) this.store.patch((doc) => void (doc.kind = 'class'), { label: 'kind' });
   }
 
   fitSelectedSize(): void {
@@ -806,40 +846,44 @@ export class Editor {
   }
 
   /** Replace the document contents, keeping positions of nodes that still exist. */
-  applyDiagram(next: Diagram, opts: { preservePositions?: boolean; relayout?: boolean; label?: string } = {}): void {
+  applyDiagram(
+    next: Diagram,
+    opts: {
+      preservePositions?: boolean;
+      relayout?: boolean;
+      label?: string;
+      /**
+       * Carry over elements the incoming source cannot describe. Used when
+       * applying Mermaid, so free text, custom shapes and annotations are not
+       * destroyed by an edit to code that never mentioned them.
+       */
+      preserveCanvasOnly?: boolean;
+    } = {},
+  ): void {
     const current = this.store.doc;
     let fresh = opts.preservePositions === false;
-    if (opts.preservePositions !== false) {
-      const byId = new Map(current.nodes.map((n) => [n.id, n]));
-      const byLabel = new Map(current.nodes.map((n) => [`${n.shape}|${n.label}`, n]));
-      let matched = 0;
-      for (const n of next.nodes) {
-        const prev = byId.get(n.id) ?? byLabel.get(`${n.shape}|${n.label}`);
-        if (prev) {
-          n.x = prev.x;
-          n.y = prev.y;
-          n.w = Math.max(n.w, prev.w);
-          n.h = Math.max(n.h, prev.h);
-          matched++;
-        }
-      }
-      if (matched < next.nodes.length) {
-        const unplaced = next.nodes.filter((n) => n.x === 0 && n.y === 0);
-        if (unplaced.length === next.nodes.length) {
-          layoutDiagram(next);
-          // Nothing carried over, so the old viewport means nothing either.
-          fresh = true;
-        } else if (unplaced.length) {
-          // Place newcomers below existing content, then relax overlaps.
-          const maxY = Math.max(0, ...next.nodes.filter((n) => !unplaced.includes(n)).map((n) => n.y + n.h));
-          unplaced.forEach((n, i) => {
-            n.x = 80 + (i % 4) * (n.w + 40);
-            n.y = maxY + 80 + Math.floor(i / 4) * (n.h + 50);
-          });
-          resolveOverlaps(next);
-        }
+    const report = mergeIncoming(current, next, {
+      preservePositions: opts.preservePositions !== false,
+      preserveCanvasOnly: opts.preserveCanvasOnly,
+    });
+
+    if (opts.preservePositions !== false && report.matched < next.nodes.length) {
+      const unplaced = next.nodes.filter((n) => n.x === 0 && n.y === 0);
+      if (unplaced.length === next.nodes.length) {
+        layoutDiagram(next);
+        // Nothing carried over, so the old viewport means nothing either.
+        fresh = true;
+      } else if (unplaced.length) {
+        // Place newcomers below existing content, then relax overlaps.
+        const maxY = Math.max(0, ...next.nodes.filter((n) => !unplaced.includes(n)).map((n) => n.y + n.h));
+        unplaced.forEach((n, i) => {
+          n.x = 80 + (i % 4) * (n.w + 40);
+          n.y = maxY + 80 + Math.floor(i / 4) * (n.h + 50);
+        });
+        resolveOverlaps(next);
       }
     }
+
     if (opts.relayout) {
       layoutDiagram(next);
       resolveOverlaps(next);
@@ -1018,6 +1062,12 @@ export class Editor {
   isEditingLabel(): boolean {
     return !!this.editing;
   }
+}
+
+/** Drop empty overrides so a node does not carry a style of all defaults. */
+function pruneStyle(style: TextStyle): TextStyle | undefined {
+  const entries = Object.entries(style).filter(([, v]) => v !== undefined && v !== null && v !== '');
+  return entries.length ? (Object.fromEntries(entries) as TextStyle) : undefined;
 }
 
 function resizeRect(start: Rect, handle: string, dx: number, dy: number, grid: number): Rect {

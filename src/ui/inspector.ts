@@ -1,11 +1,11 @@
 import type { Editor } from '../editor';
-import { SHAPE_LABELS, type ArrowHead, type Direction, type EdgeLine, type NodeShape } from '../core/model';
+import type { ArrowHead, Direction, EdgeLine, TextFont, TextStyle } from '../core/model';
 import { PALETTE_KEYS, themeFor } from '../render/theme';
+import { FONT_LABELS, MAX_FONT_SIZE, MIN_FONT_SIZE, resolveText } from '../render/typography';
+import { CATEGORY_LABELS, CATEGORY_ORDER, shapeDef, shapesByCategory } from '../shapes/registry';
 import { clearChildren, h, iconButton, select } from './dom';
 import { icons } from './icons';
 import { shapePreview } from './palette';
-
-const SHAPE_OPTIONS = Object.keys(SHAPE_LABELS) as NodeShape[];
 
 const ARROWS: { value: ArrowHead; label: string }[] = [
   { value: 'none', label: 'None' },
@@ -53,7 +53,7 @@ function renderNodeProps(root: HTMLElement, editor: Editor): void {
   const first = nodes[0];
   if (!first) return;
   const multi = nodes.length > 1;
-  root.append(h('div', { class: 'panel-label', text: multi ? `${nodes.length} shapes` : SHAPE_LABELS[first.shape] }));
+  root.append(h('div', { class: 'panel-label', text: multi ? `${nodes.length} shapes` : shapeDef(first.shape).name }));
 
   if (!multi) {
     const labelInput = h('textarea', { class: 'input', value: first.label, placeholder: 'Label' });
@@ -70,20 +70,26 @@ function renderNodeProps(root: HTMLElement, editor: Editor): void {
     root.append(row('Label', labelInput));
   }
 
-  const shapeGrid = h('div', { class: 'shape-grid' });
-  for (const shape of SHAPE_OPTIONS) {
-    const active = nodes.every((n) => n.shape === shape);
-    shapeGrid.append(
-      h('button', {
-        class: `shape-chip ${active ? 'active' : ''}`,
-        type: 'button',
-        title: SHAPE_LABELS[shape],
-        html: shapePreview(shape, 34, 24),
-        on: { click: () => editor.setShape(shape) },
-      }),
-    );
+  const shapeSection = h('div', { class: 'shape-sections' });
+  for (const category of CATEGORY_ORDER) {
+    const shapes = shapesByCategory(category);
+    if (!shapes.length) continue;
+    const grid = h('div', { class: 'shape-grid' });
+    for (const def of shapes) {
+      const active = nodes.every((n) => n.shape === def.id);
+      grid.append(
+        h('button', {
+          class: `shape-chip ${active ? 'active' : ''}`,
+          type: 'button',
+          title: def.name,
+          html: shapePreview(def.id, 34, 24),
+          on: { click: () => editor.setShape(def.id) },
+        }),
+      );
+    }
+    shapeSection.append(h('div', { class: 'shape-section-label', text: CATEGORY_LABELS[category] }), grid);
   }
-  root.append(row('Shape', shapeGrid));
+  root.append(row('Shape', shapeSection));
 
   const theme = themeFor(editor.store.prefs.theme);
   const swatches = h('div', { class: 'swatches' });
@@ -137,6 +143,8 @@ function renderNodeProps(root: HTMLElement, editor: Editor): void {
     });
     root.append(row('Stereotype', stereo), row('Attributes', attrs), row('Methods', methods));
   }
+
+  root.append(textControls(editor, nodes[0].text, shapeDef(first.shape).text));
 
   if (multi) {
     const alignRow = h('div', { class: 'btn-row' });
@@ -206,6 +214,8 @@ function renderEdgeProps(root: HTMLElement, editor: Editor): void {
     });
     root.append(row('Label', labelInput));
   }
+
+  root.append(textControls(editor, first.text, undefined, 'Label text'));
 
   root.append(
     row(
@@ -350,6 +360,97 @@ function renderDiagramProps(root: HTMLElement, editor: Editor): void {
     ),
     h('p', { class: 'palette-hint', text: 'Select a shape or connection to edit it. Nothing selected shows diagram-wide settings.' }),
   );
+}
+
+/**
+ * Type settings, shared by nodes and edge labels. Values shown are the
+ * resolved ones, so an unset field still displays what you actually see.
+ */
+function textControls(
+  editor: Editor,
+  style: TextStyle | undefined,
+  shapeDefault: TextStyle | undefined,
+  heading = 'Text',
+): HTMLElement {
+  const resolved = resolveText(style, shapeDefault ? { text: shapeDefault } as never : undefined);
+  const wrap = h('div', { class: 'text-controls' });
+
+  const fonts = (Object.keys(FONT_LABELS) as TextFont[]).map((f) => ({ value: f, label: FONT_LABELS[f] }));
+  const fontSelect = select<TextFont>(fonts, resolved.font, (v) => editor.updateTextStyle({ font: v }));
+
+  const size = h('input', {
+    class: 'input num',
+    type: 'number',
+    value: String(Math.round(resolved.size)),
+    attrs: { min: MIN_FONT_SIZE, max: MAX_FONT_SIZE, step: 1 },
+  });
+  size.addEventListener('change', () => {
+    const value = Number(size.value);
+    if (Number.isFinite(value)) editor.updateTextStyle({ size: value });
+  });
+
+  const toggle = (icon: string, title: string, on: boolean, patch: Partial<TextStyle>) =>
+    h('button', {
+      class: `btn icon ${on ? 'active' : ''}`,
+      type: 'button',
+      title,
+      html: icon,
+      on: { click: () => editor.updateTextStyle(patch) },
+    });
+
+  const alignButton = (icon: string, title: string, on: boolean, patch: Partial<TextStyle>) =>
+    toggle(icon, title, on, patch);
+
+  wrap.append(
+    h('div', { class: 'field-control' }, fontSelect, h('div', { class: 'num-field compact' }, size)),
+    h(
+      'div',
+      { class: 'btn-row tight' },
+      toggle(icons.bold, 'Bold', resolved.weight >= 700, { bold: resolved.weight < 700 }),
+      toggle(icons.italic, 'Italic', resolved.italic, { italic: !resolved.italic }),
+      toggle(icons.underline, 'Underline', resolved.underline, { underline: !resolved.underline }),
+      toggle(icons.uppercase, 'Upper case', resolved.uppercase, { uppercase: !resolved.uppercase }),
+    ),
+    h(
+      'div',
+      { class: 'btn-row tight' },
+      alignButton(icons.alignTextLeft, 'Align left', resolved.align === 'left', { align: 'left' }),
+      alignButton(icons.alignTextCenter, 'Align centre', resolved.align === 'center', { align: 'center' }),
+      alignButton(icons.alignTextRight, 'Align right', resolved.align === 'right', { align: 'right' }),
+      h('span', { class: 'control-gap' }),
+      alignButton(icons.alignTop, 'Top', resolved.valign === 'top', { valign: 'top' }),
+      alignButton(icons.alignCenterV, 'Middle', resolved.valign === 'middle', { valign: 'middle' }),
+      alignButton(icons.alignBottom, 'Bottom', resolved.valign === 'bottom', { valign: 'bottom' }),
+    ),
+    textColours(editor, style?.color),
+  );
+  return h('div', { class: 'field' }, h('label', { class: 'field-label', text: heading }), wrap);
+}
+
+function textColours(editor: Editor, current: string | undefined): HTMLElement {
+  const theme = themeFor(editor.store.prefs.theme);
+  const swatches = h('div', { class: 'swatches' });
+  swatches.append(
+    h('button', {
+      class: `swatch auto ${current ? '' : 'active'}`,
+      type: 'button',
+      title: 'Follow the shape',
+      on: { click: () => editor.updateTextStyle({ color: undefined }) },
+    }),
+  );
+  for (const key of PALETTE_KEYS) {
+    const entry = theme.palette[key];
+    swatches.append(
+      h('button', {
+        class: `swatch ${current === key ? 'active' : ''}`,
+        type: 'button',
+        title: `${entry.name} text`,
+        style: { background: entry.stroke, borderColor: entry.stroke },
+        on: { click: () => editor.updateTextStyle({ color: key }) },
+      }),
+    );
+  }
+  return swatches;
 }
 
 function splitLines(value: string): string[] {

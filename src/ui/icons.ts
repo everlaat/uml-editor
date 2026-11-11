@@ -33,6 +33,13 @@ export const icons = {
   spaceH: wrap('<path d="M4 4v16M20 4v16"/><rect x="9" y="8" width="6" height="8" rx="1"/>'),
   spaceV: wrap('<path d="M4 4h16M4 20h16"/><rect x="8" y="9" width="8" height="6" rx="1"/>'),
   arrowRight: wrap('<path d="M5 12h14M13 6l6 6-6 6"/>'),
+  bold: wrap('<path d="M7 5h6a3.5 3.5 0 0 1 0 7H7zM7 12h7a3.5 3.5 0 0 1 0 7H7z"/>'),
+  italic: wrap('<path d="M14 5h-4M14 19h-4M15 5l-4 14"/>'),
+  underline: wrap('<path d="M7 4v6a5 5 0 0 0 10 0V4M5 20h14"/>'),
+  uppercase: wrap('<path d="M3 18 7.5 7 12 18M4.6 14.5h5.8M14 18l3.5-8 3.5 8M15.2 15.6h4.6"/>'),
+  alignTextLeft: wrap('<path d="M4 6h16M4 11h10M4 16h14M4 21h8"/>'),
+  alignTextCenter: wrap('<path d="M4 6h16M7 11h10M5 16h14M8 21h8"/>'),
+  alignTextRight: wrap('<path d="M4 6h16M10 11h10M6 16h14M12 21h8"/>'),
   keyboard: wrap('<rect x="3" y="7" width="18" height="11" rx="2"/><path d="M7 11h.01M11 11h.01M15 11h.01M8 15h8"/>'),
 };
 

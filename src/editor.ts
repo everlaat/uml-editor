@@ -1,5 +1,5 @@
 import { distToSegment, pointInRect, snap, type Pt, type Rect } from './core/geometry';
-import { layoutDiagram, resolveOverlaps } from './core/layout';
+import { adjustRoutes, anchorFor, layoutDiagram, resolveOverlaps } from './core/layout';
 import {
   DEFAULT_NODE_SIZE,
   makeEdge,
@@ -26,6 +26,8 @@ interface DragState {
   nodeId?: string;
   handle?: string;
   origin?: Map<string, Rect>;
+  /** Waypoints as they were when the drag began, so frames do not compound. */
+  routeOrigin?: Map<string, Pt[]>;
   additive?: boolean;
   viewStart?: Pt;
   pointerId?: number;
@@ -221,7 +223,13 @@ export class Editor {
       else if (!this.store.selection.nodes.has(node.id)) this.store.select([node.id]);
       const origin = new Map<string, Rect>();
       for (const n of this.store.selectedNodes()) origin.set(n.id, { x: n.x, y: n.y, w: n.w, h: n.h });
-      this.drag = { ...base, kind: 'move', nodeId: node.id, origin };
+      const routeOrigin = new Map<string, Pt[]>();
+      for (const e of this.store.doc.edges) {
+        if (e.waypoints?.length && origin.has(e.from) && origin.has(e.to)) {
+          routeOrigin.set(e.id, e.waypoints.map((p) => ({ ...p })));
+        }
+      }
+      this.drag = { ...base, kind: 'move', nodeId: node.id, origin, routeOrigin };
       return;
     }
 
@@ -266,12 +274,17 @@ export class Editor {
         const useSnap = this.store.prefs.snap !== e.altKey;
         this.store.patch(
           (doc) => {
+            let appliedX = 0;
+            let appliedY = 0;
             for (const [id, start] of drag.origin!) {
               const n = doc.nodes.find((x) => x.id === id);
               if (!n) continue;
               n.x = useSnap ? snap(start.x + dx, GRID) : Math.round(start.x + dx);
               n.y = useSnap ? snap(start.y + dy, GRID) : Math.round(start.y + dy);
+              appliedX = n.x - start.x;
+              appliedY = n.y - start.y;
             }
+            this.moveRoutes(doc, drag, appliedX, appliedY);
           },
           { label: 'move', coalesce: `move:${[...drag.origin!.keys()].join(',')}` },
         );
@@ -289,6 +302,7 @@ export class Editor {
             n.y = next.y;
             n.w = next.w;
             n.h = next.h;
+            adjustRoutes(doc, new Set([n.id]));
           },
           { label: 'resize', coalesce: `resize:${drag.nodeId}` },
         );
@@ -585,6 +599,7 @@ export class Editor {
           n.x += dx;
           n.y += dy;
         }
+        adjustRoutes(doc, ids, dx, dy);
       },
       { label: 'nudge', coalesce: 'nudge' },
     );
@@ -611,6 +626,8 @@ export class Editor {
       id: uid('e'),
       from: map.get(e.from)!,
       to: map.get(e.to)!,
+      waypoints: undefined,
+      waypointAnchor: undefined,
     }));
     this.store.patch(
       (doc) => {
@@ -640,6 +657,7 @@ export class Editor {
     this.store.patch(
       (doc) => {
         for (const n of doc.nodes) if (ids.has(n.id)) mutate(n);
+        adjustRoutes(doc, ids);
       },
       { label },
     );
@@ -735,6 +753,7 @@ export class Editor {
             break;
           }
         }
+        adjustRoutes(doc, ids);
       },
       { label: `align ${mode}` },
     );
@@ -771,6 +790,7 @@ export class Editor {
   /** Replace the document contents, keeping positions of nodes that still exist. */
   applyDiagram(next: Diagram, opts: { preservePositions?: boolean; relayout?: boolean; label?: string } = {}): void {
     const current = this.store.doc;
+    let fresh = opts.preservePositions === false;
     if (opts.preservePositions !== false) {
       const byId = new Map(current.nodes.map((n) => [n.id, n]));
       const byLabel = new Map(current.nodes.map((n) => [`${n.shape}|${n.label}`, n]));
@@ -787,8 +807,11 @@ export class Editor {
       }
       if (matched < next.nodes.length) {
         const unplaced = next.nodes.filter((n) => n.x === 0 && n.y === 0);
-        if (unplaced.length === next.nodes.length) layoutDiagram(next);
-        else if (unplaced.length) {
+        if (unplaced.length === next.nodes.length) {
+          layoutDiagram(next);
+          // Nothing carried over, so the old viewport means nothing either.
+          fresh = true;
+        } else if (unplaced.length) {
           // Place newcomers below existing content, then relax overlaps.
           const maxY = Math.max(0, ...next.nodes.filter((n) => !unplaced.includes(n)).map((n) => n.y + n.h));
           unplaced.forEach((n, i) => {
@@ -807,6 +830,7 @@ export class Editor {
     next.name = next.name || current.name;
     next.view = this.scene.view;
     this.store.replaceDoc(next, opts.label ?? 'apply');
+    if (fresh || opts.relayout) this.fit();
     this.scheduleRender();
   }
 
@@ -827,6 +851,7 @@ export class Editor {
       id: uid('e'),
       from: idMap.get(e.from)!,
       to: idMap.get(e.to)!,
+      waypoints: e.waypoints?.map((p) => ({ x: p.x, y: p.y + offsetY })),
     }));
     this.store.patch(
       (doc) => {
@@ -838,6 +863,27 @@ export class Editor {
     );
     this.store.select(nodes.map((n) => n.id));
     this.fit();
+  }
+
+  /** Keep lanes attached while a whole sub-graph is dragged; drop the rest. */
+  private moveRoutes(doc: Diagram, drag: DragState, dx: number, dy: number): void {
+    const ids = new Set(drag.origin!.keys());
+    const byId = new Map(doc.nodes.map((n) => [n.id, n]));
+    for (const e of doc.edges) {
+      const fromMoved = ids.has(e.from);
+      const toMoved = ids.has(e.to);
+      if (!fromMoved && !toMoved) continue;
+      const base = drag.routeOrigin?.get(e.id);
+      if (fromMoved && toMoved && base) {
+        e.waypoints = base.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+        const from = byId.get(e.from);
+        const to = byId.get(e.to);
+        if (from && to) e.waypointAnchor = anchorFor(from, to);
+      } else if (e.waypoints?.length) {
+        e.waypoints = undefined;
+        e.waypointAnchor = undefined;
+      }
+    }
   }
 
   private persistView(): void {

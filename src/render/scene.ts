@@ -1,18 +1,6 @@
-import {
-  anchorToward,
-  boundsOf,
-  center,
-  curvedPath,
-  dist,
-  f,
-  orthogonalPath,
-  pointAlong,
-  roundedPolyline,
-  type Pt,
-  type Rect,
-  type Side,
-} from '../core/geometry';
-import type { ArrowHead, Diagram, DiagramEdge, DiagramNode } from '../core/model';
+import { boundsOf, f, pointAlong, type Pt, type Rect, type Side } from '../core/geometry';
+import type { ArrowHead, Diagram, DiagramNode } from '../core/model';
+import { parallelOffsets, routeEdge } from './route';
 import type { Selection } from '../core/store';
 import { classHeaderHeight, compartmentHeight, labelFontSize, shapeGeometry } from './shapes';
 import { clear, setAttrs, svgEl } from './svg';
@@ -373,7 +361,7 @@ export class Scene {
   private renderEdges(doc: Diagram, selection: Selection): void {
     const seen = new Set<string>();
     const byId = new Map(doc.nodes.map((n) => [n.id, n]));
-    const parallel = groupParallel(doc.edges);
+    const parallel = parallelOffsets(doc.edges);
     for (const edge of doc.edges) {
       const from = byId.get(edge.from);
       const to = byId.get(edge.to);
@@ -387,7 +375,7 @@ export class Scene {
       }
       clear(g);
       const offset = parallel.get(edge.id) ?? 0;
-      const route = this.routeEdge(doc, edge, from, to, offset);
+      const route = routeEdge(doc, edge, from, to, offset);
       this.lastRoutes.set(edge.id, route.points);
       const selected = selection.edges.has(edge.id);
       const color = edge.color ?? (selected ? this.theme.accent : this.theme.edge);
@@ -452,31 +440,6 @@ export class Scene {
         this.lastRoutes.delete(id);
       }
     }
-  }
-
-  private routeEdge(
-    doc: Diagram,
-    edge: DiagramEdge,
-    from: DiagramNode,
-    to: DiagramNode,
-    offset: number,
-  ): { d: string; points: Pt[] } {
-    if (from.id === to.id) return selfLoop(from);
-    const style = edge.route ?? defaultRoute(doc);
-    const ca = center(from);
-    const cb = center(to);
-    const target = offset ? perpOffset(ca, cb, offset) : cb;
-    const source = offset ? perpOffset(cb, ca, -offset) : ca;
-    const a = anchorToward(from, target, 2);
-    const b = anchorToward(to, source, 2);
-    if (style === 'curved') {
-      return { d: curvedPath(a.p, a.side, b.p, b.side), points: [a.p, midOf(a.p, b.p), b.p] };
-    }
-    if (style === 'straight') {
-      return { d: `M ${f(a.p.x)} ${f(a.p.y)} L ${f(b.p.x)} ${f(b.p.y)}`, points: [a.p, b.p] };
-    }
-    const pts = orthogonalPath(a.p, a.side, b.p, b.side);
-    return { d: roundedPolyline(pts, 12), points: pts };
   }
 
   private renderOverlay(doc: Diagram, selection: Selection): void {
@@ -611,48 +574,6 @@ export class Scene {
       );
     }
   }
-}
-
-function midOf(a: Pt, b: Pt): Pt {
-  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-}
-
-function perpOffset(from: Pt, to: Pt, amount: number): Pt {
-  const d = dist(from, to) || 1;
-  const nx = -(to.y - from.y) / d;
-  const ny = (to.x - from.x) / d;
-  return { x: to.x + nx * amount, y: to.y + ny * amount };
-}
-
-/** Fan out edges that share the same node pair. */
-function groupParallel(edges: DiagramEdge[]): Map<string, number> {
-  const buckets = new Map<string, DiagramEdge[]>();
-  for (const e of edges) {
-    const key = [e.from, e.to].sort().join('->');
-    const list = buckets.get(key) ?? [];
-    list.push(e);
-    buckets.set(key, list);
-  }
-  const offsets = new Map<string, number>();
-  for (const list of buckets.values()) {
-    if (list.length < 2) continue;
-    const step = 26;
-    list.forEach((e, i) => offsets.set(e.id, (i - (list.length - 1) / 2) * step));
-  }
-  return offsets;
-}
-
-function defaultRoute(doc: Diagram): 'orthogonal' | 'straight' | 'curved' {
-  return doc.kind === 'class' ? 'straight' : 'orthogonal';
-}
-
-function selfLoop(n: DiagramNode): { d: string; points: Pt[] } {
-  const a = { x: n.x + n.w, y: n.y + n.h * 0.3 };
-  const b = { x: n.x + n.w, y: n.y + n.h * 0.7 };
-  const r = 34;
-  const d =
-    `M ${f(a.x)} ${f(a.y)} C ${f(a.x + r)} ${f(a.y - r * 0.4)} ${f(b.x + r)} ${f(b.y + r * 0.4)} ${f(b.x)} ${f(b.y)}`;
-  return { d, points: [a, { x: a.x + r, y: (a.y + b.y) / 2 }, b] };
 }
 
 export function resizeHandles(n: DiagramNode): { x: number; y: number; dir: string }[] {

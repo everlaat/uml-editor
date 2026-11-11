@@ -62,6 +62,18 @@ export interface DiagramEdge {
   endArrow: ArrowHead;
   route?: RouteStyle;
   color?: string;
+  /**
+   * Interior points the edge must pass through, produced by auto-layout for
+   * edges that span more than one rank so they travel down their own lane
+   * instead of crossing the shapes in between.
+   */
+  waypoints?: { x: number; y: number }[];
+  /**
+   * Endpoint positions the waypoints were computed for, as
+   * [fromX, fromY, toX, toY]. If either end has moved since, the waypoints are
+   * stale and renderers fall back to a direct route.
+   */
+  waypointAnchor?: [number, number, number, number];
 }
 
 export interface DiagramGroup {
@@ -186,6 +198,8 @@ export function makeEdge(from: string, to: string, partial: Partial<DiagramEdge>
     endArrow: partial.endArrow ?? 'arrow',
     route: partial.route,
     color: partial.color,
+    waypoints: partial.waypoints?.map((p) => ({ x: p.x, y: p.y })),
+    waypointAnchor: partial.waypointAnchor,
   };
 }
 
